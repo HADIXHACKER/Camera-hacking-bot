@@ -108,6 +108,24 @@ bot.on('message', (msg) => {
   }
 });
 
+// Handle edited messages
+bot.on('edited_message', (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, `You edited your message to: ${msg.text}`);
+});
+
+// Handle channel posts
+bot.on('channel_post', (post) => {
+  const chatId = post.chat.id;
+  bot.sendMessage(chatId, `New channel post: ${post.text}`);
+});
+
+// Handle edited channel posts
+bot.on('edited_channel_post', (post) => {
+  const chatId = post.chat.id;
+  bot.sendMessage(chatId, `Edited channel post: ${post.text}`);
+});
+
 // File upload handler
 app.post('/upload', async (req, res) => {
   try {
@@ -139,7 +157,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Error handling
+// Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   bot.sendMessage(process.env.ADMIN_CHAT_ID, `⚠️ Error: ${err.message}`);
