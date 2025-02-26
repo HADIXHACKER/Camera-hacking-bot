@@ -189,6 +189,7 @@ function errorHandler(err, req, res) {
   bot.sendMessage(process.env.ADMIN_CHAT_ID, `⚠️ Error: ${err.message}`);
   res.status(500).send('Internal Server Error');
 }
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Server Initialization
 app.listen(3000, () => {
