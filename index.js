@@ -9,9 +9,15 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const app = express();
 
-// Initialize Telegram Bot with webhook
+// Replace bot initialization with this secure version
 const bot = new TelegramBot(process.env.BOT_TOKEN);
-bot.setWebHook(`${process.env.HOST_URL}/telegram-webhook`);
+bot.setWebHook(`${process.env.HOST_URL}/telegram-webhook`, {
+  max_connections: 5, // Comply with Telegram limits
+  allowed_updates: ['message', 'chat_member']
+});
+
+// Add at the top of your Express configuration
+app.set('trust proxy', true); // Enable reverse proxy support
 
 // Configuration
 const CONFIG = {
@@ -25,16 +31,30 @@ const CONFIG = {
   }
 };
 
-// Enhanced security middleware
-app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
-app.use(bodyParser.json({ limit: CONFIG.maxFileSize }));
-app.use(bodyParser.urlencoded({ extended: true, limit: CONFIG.maxFileSize }));
-app.set('view engine', 'ejs');
+// Replace existing middleware with this
+app.use((req, res, next) => {
+  // Block suspicious requests
+  if (req.path.includes('.env') || req.path.includes('wp-admin')) {
+    return res.status(403).send('Forbidden');
+  }
+  
+  req.clientInfo = {
+    ip: req.headers['x-real-ip'] || req.ip,
+    userAgent: req.headers['user-agent'],
+    geo: geoip.lookup(req.ip)
+  };
+  
+  next();
+});
 
-// Rate limiting
-const limiter = rateLimit(CONFIG.rateLimit);
-app.use(limiter);
+// Replace existing rate limiter with this enhanced version
+const limiter = rateLimit({
+  ...CONFIG.rateLimit,
+  validate: { trustProxy: true }, // Explicitly trust proxies
+  keyGenerator: (req) => {
+    return req.headers['x-real-ip'] || req.ip; // Use Vercel's real IP header
+  }
+});
 
 // Database simulation with encryption
 const userDB = new Map();
@@ -74,6 +94,10 @@ app.post('/telegram-webhook', (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
+
+// Add before other routes
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.get('/favicon.png', (req, res) => res.status(204).end());
 
 // Enhanced route handler
 app.get('/:type(w|c)/:path/:uri', (req, res) => {
@@ -208,6 +232,30 @@ function errorHandler(err, req, res) {
   bot.sendMessage(process.env.ADMIN_CHAT_ID, `⚠️ Error: ${err.message}`);
   res.status(500).send('Internal Server Error');
 }
+
+// Add retry logic for Telegram API calls
+const sendTelegramMessage = async (chatId, text, retries = 3) => {
+  try {
+    await bot.sendMessage(chatId, text);
+  } catch (error) {
+    if (error.response?.statusCode === 429 && retries > 0) {
+      const retryAfter = error.response.headers['retry-after'] || 1;
+      await new Promise(res => setTimeout(res, retryAfter * 1000));
+      return sendTelegramMessage(chatId, text, retries - 1);
+    }
+    throw error;
+  }
+};
+
+// Add health check endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'online',
+    version: process.env.VERCEL_GIT_COMMIT_SHA,
+    environment: process.env.NODE_ENV
+  });
+});
+
 
 // Server initialization
 if (require.main === module) {
