@@ -1,19 +1,15 @@
 {
   "version": 2,
-  "builds": [{
-    "src": "index.js",
-    "use": "@vercel/node",
-    "config": { 
-      "includeFiles": ["views/**"]
+  "builds": [
+    {
+      "src": "index.js",
+      "use": "@vercel/node"
     }
-  }],
-  
-  "limits": {
-    "durationSeconds": 60,
-    "total": 1000
-  }
-  "routes": [{
-    "src": "/(.*)",
-    "dest": "index.js"
-  }]
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "index.js"
+    }
+  ]
 }
