@@ -108,6 +108,10 @@ process.on('uncaughtException', (err) => {
     bot.sendMessage(ADMIN_CHAT_ID, `🚨 Server Crash: ${err.message}`);
   }
 });
+bot.on('message', (msg) => {
+  console.log("Received message:", msg);
+  // Other processing logic here
+});
 
 // ✅ Start the Server
 const PORT = process.env.PORT || 3000;
