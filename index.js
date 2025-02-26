@@ -94,36 +94,36 @@ app.post('/telegram-webhook', (req, res) => {
 });
 
 // Handle regular messages
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
   if (text === '/start') {
-    bot.sendMessage(chatId, 'Welcome! Use /create to generate a tracking link.');
+    await sendMessageWithDelay(chatId, 'Welcome! Use /create to generate a tracking link.');
   } else if (text === '/create') {
     const uid = crypto.randomBytes(16).toString('hex');
     const encryptedUID = encrypt(uid);
     const trackingUrl = `${CONFIG.hostURL}/w/${uid}/${encryptedUID}`;
-    bot.sendMessage(chatId, `🛠 Tracking link created:\n${trackingUrl}`);
+    await sendMessageWithDelay(chatId, `🛠 Tracking link created:\n${trackingUrl}`);
   }
 });
 
 // Handle edited messages
-bot.on('edited_message', (msg) => {
+bot.on('edited_message', async (msg) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, `You edited your message to: ${msg.text}`);
+  await sendMessageWithDelay(chatId, `You edited your message to: ${msg.text}`);
 });
 
 // Handle channel posts
-bot.on('channel_post', (post) => {
+bot.on('channel_post', async (post) => {
   const chatId = post.chat.id;
-  bot.sendMessage(chatId, `New channel post: ${post.text}`);
+  await sendMessageWithDelay(chatId, `New channel post: ${post.text}`);
 });
 
 // Handle edited channel posts
-bot.on('edited_channel_post', (post) => {
+bot.on('edited_channel_post', async (post) => {
   const chatId = post.chat.id;
-  bot.sendMessage(chatId, `Edited channel post: ${post.text}`);
+  await sendMessageWithDelay(chatId, `Edited channel post: ${post.text}`);
 });
 
 // File upload handler
