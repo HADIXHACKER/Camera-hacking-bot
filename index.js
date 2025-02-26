@@ -190,6 +190,9 @@ function errorHandler(err, req, res) {
   res.status(500).send('Internal Server Error');
 }
 app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.get('/', (req, res) => {
+  res.send('🚀 Server is running on Vercel!');
+});
 
 // Server Initialization
 app.listen(3000, () => {
